@@ -2,6 +2,13 @@ name: Update Williams Oliver ABC feed
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - filter_feed.py
+      - blocked_vendors.txt
+      - .github/workflows/update-feed.yml
   schedule:
     - cron: "17 */4 * * *"
 
