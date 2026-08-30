@@ -7,7 +7,9 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 import unicodedata
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from collections import Counter
@@ -214,27 +216,77 @@ def load_blacklist(path: Path) -> tuple[list[str], set[str]]:
     return raw, normalized
 
 
-def download_source(source: str, destination: Path) -> None:
-    if source.startswith(("http://", "https://")):
+def download_http_with_retries(
+    source: str,
+    destination: Path,
+    headers: dict[str, str],
+    description: str,
+    timeout: int,
+    attempts: int = 3,
+) -> None:
+    last_error: Exception | None = None
+
+    for attempt in range(1, attempts + 1):
         request = urllib.request.Request(
             source,
-            headers={
-                "User-Agent": "WO-Feed-Filter/2.0 (+GitHub Actions)",
-                "Accept": "application/xml,text/xml;q=0.9,*/*;q=0.8",
-            },
+            headers=headers,
         )
 
-        with urllib.request.urlopen(
-            request,
-            timeout=180,
-        ) as response, destination.open("wb") as out:
+        try:
+            with urllib.request.urlopen(
+                request,
+                timeout=timeout,
+            ) as response, destination.open("wb") as out:
 
-            if response.status != 200:
-                raise RuntimeError(
-                    f"Source returned HTTP {response.status}"
+                if response.status != 200:
+                    raise RuntimeError(
+                        f"{description} returned HTTP {response.status}"
+                    )
+
+                shutil.copyfileobj(response, out)
+
+            return
+
+        except (
+            TimeoutError,
+            urllib.error.URLError,
+            OSError,
+            RuntimeError,
+        ) as exc:
+            last_error = exc
+
+            if destination.exists():
+                destination.unlink()
+
+            if attempt < attempts:
+                wait_seconds = attempt * 10
+                print(
+                    f"WARNING: {description} download attempt "
+                    f"{attempt}/{attempts} failed: {exc}; "
+                    f"retrying in {wait_seconds}s",
+                    file=sys.stderr,
+                    flush=True,
                 )
+                time.sleep(wait_seconds)
 
-            shutil.copyfileobj(response, out)
+    raise RuntimeError(
+        f"{description} download failed after {attempts} attempts: "
+        f"{last_error}"
+    )
+
+
+def download_source(source: str, destination: Path) -> None:
+    if source.startswith(("http://", "https://")):
+        download_http_with_retries(
+            source,
+            destination,
+            headers={
+                "User-Agent": "WO-Feed-ABC/1.0 (+GitHub Actions)",
+                "Accept": "application/xml,text/xml;q=0.9,*/*;q=0.8",
+            },
+            description="Source feed",
+            timeout=300,
+        )
 
     else:
         shutil.copyfile(source, destination)
@@ -249,25 +301,16 @@ def download_source(source: str, destination: Path) -> None:
 
 def download_purchase_stats(source: str, destination: Path) -> None:
     if source.startswith(("http://", "https://")):
-        request = urllib.request.Request(
+        download_http_with_retries(
             source,
+            destination,
             headers={
                 "User-Agent": "WO-Feed-ABC/1.0 (+GitHub Actions)",
                 "Accept": "text/csv,text/plain;q=0.9,*/*;q=0.8",
             },
+            description="Purchase CSV",
+            timeout=180,
         )
-
-        with urllib.request.urlopen(
-            request,
-            timeout=120,
-        ) as response, destination.open("wb") as out:
-
-            if response.status != 200:
-                raise RuntimeError(
-                    f"Purchase CSV returned HTTP {response.status}"
-                )
-
-            shutil.copyfileobj(response, out)
 
     else:
         shutil.copyfile(source, destination)
