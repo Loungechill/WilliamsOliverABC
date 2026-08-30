@@ -17,12 +17,12 @@ permissions:
 
 concurrency:
   group: williams-oliver-abc-feed-update
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   update-feed:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Check out repository
@@ -33,6 +33,7 @@ jobs:
 
       - name: Build and validate ABC feed
         run: |
+          set -o pipefail
           python3 filter_feed.py \
             --source "https://williams-oliver.ru/api/feed/diginetica" \
             --stats-source "https://docs.google.com/spreadsheets/d/e/2PACX-1vScRdlWu7ubF2LL_8s60FJYu21hC856eBRMBtaekSFMqgih3iWfE6jE_L-o2POASlcU-l_5hd4frTtk/pub?gid=0&single=true&output=csv" \
